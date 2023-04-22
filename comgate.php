@@ -2,13 +2,15 @@
 /*
  * Plugin Name: Comgate WooCommerce Custom Payment Gateway
  * Plugin URI: 
- * Description: Take credit card payments on your store.
+ * Description: WP integration with WP Gateway
  * Author: Veaceslav Mindru
  * Author URI: 
  * Version: 0.0.1
  */
 
+/* https://woocommerce.com/document/woocommerce-payment-gateway-plugin-base/ */
 /* https://rudrastyh.com/woocommerce/payment-gateway-plugin.html */
+/* https://woocommerce.com/document/payment-gateway-api/ */
 
 /*
  * This action hook registers our PHP class as a WooCommerce payment gateway
@@ -50,17 +52,50 @@ function comgate_init_gateway_class() {
 						$this->enabled = $this->get_option( 'enabled' );
 						$this->testmode = 'yes' === $this->get_option( 'testmode' );
 						$this->private_key = $this->testmode ? $this->get_option( 'test_private_key' ) : $this->get_option( 'private_key' );
-						$this->publishable_key = $this->testmode ? $this->get_option( 'test_publishable_key' ) : $this->get_option( 'publishable_key' );
+            $this->merchant = $this->testmode ? $this->get_option( 'test_merchant' ) : $this->get_option( 'merchant' );
+            $this->paymentsUrl = $this->testmode ? $this->get_option( 'test_paymentsUrl' ) : $this->get_option( 'paymentsUrl' );
 					
-						// This action hook saves the settings
-						add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
 					
-						// We need custom JavaScript to obtain a token
-						add_action( 'wp_enqueue_scripts', array( $this, 'payment_scripts' ) );
-						
-						// You can also register a webhook here
-						// add_action( 'woocommerce_api_{webhook name}', array( $this, 'webhook' ) );
+						// Register Comgate Complete
+//						add_action( 'woocommerce_api_' . $this->id , array( $this, 'comgate_callback' ) );
+            add_action( 'woocommerce_api_comgate_callback', array( $this, 'comgate_callback' ) );
           }
+
+				  function comgate_callback() { 
+					    header( 'HTTP/1.1 200 OK' );
+              echo "processing payment<br>" ;
+              $order_id = isset($_REQUEST['refId']) ? $_REQUEST['refId'] : null;
+              $comgate_id = isset($_REQUEST['id']) ? $_REQUEST['id'] : null;
+              if (is_null($order_id)) return;
+              if (is_null($comgate_id)) return;
+              $order = wc_get_order($order_id) ;
+              if(empty($order)){
+                die() ;
+              }
+              else
+              {
+                $trnsct_id = $order->get_transaction_id();
+              }
+              if ($trnsct_id == $comgate_id ){
+              $order->payment_complete();
+              wc_reduce_stock_levels($order_id);
+              echo "order_id: $order_id<br>" ;
+              echo "comgate_id: $comgate_id <br>" ;
+              echo "trnsct_id: $trnsct_id <br>" ;
+              echo "payment processed";
+							$items = $order->get_items();
+							foreach ( $items as $item ) {
+							    $product_name = $item['name'];
+							    $product_id = $item['product_id'];
+									$product = get_product($product_id);
+								  $stock = $product->get_stock_quantity() ;
+							}
+              error_log("call with order_id: $order_id and comgate_id: $comgate_id") ;
+              error_log("product: $product_id, product_name: $product_name, stock_left: $stock") ;
+              }
+              wp_redirect("https://tshop.motokarymodrice.cz/checkout/order-received/") ;
+              die();
+					}
 
               /**
                 *      * Plugin options, we deal with it in Step 3 too
@@ -96,43 +131,35 @@ function comgate_init_gateway_class() {
 								'default'     => 'yes',
 								'desc_tip'    => true,
 							),
-							'test_publishable_key' => array(
-								'title'       => 'Test Publishable Key',
-								'type'        => 'text'
-							),
 							'test_private_key' => array(
-								'title'       => 'Test Private Key',
+								'title'       => 'Test Comgate Private Key',
 								'type'        => 'password',
 							),
-							'publishable_key' => array(
-								'title'       => 'Live Publishable Key',
-								'type'        => 'text'
+							'test_paymentsUrl' => array(
+								'title'       => 'Test Comgate Payments Url',
+								'type'        => 'text',
+                'default'     => 'https://payments.comgate.cz/v1.0/create'
+							),
+							'test_merchant' => array(
+								'title'       => 'Test Comgate merchant ID',
+								'type'        => 'text',
 							),
 							'private_key' => array(
-								'title'       => 'Live Private Key',
+								'title'       => 'Comgate Production Private Key',
 								'type'        => 'password'
+              ),
+              'paymentsUrl' => array(
+                'title'       => 'Comgate Production Payments Url',
+                'type'        => 'text',
+                'default'     => 'https://payments.comgate.cz/v1.0/create'
+							),
+              'merchant' => array(
+                'title'       => 'Production Comgate merchant ID',
+                'type'        => 'text',
 							)
 						);
 					}
 
-
-#
-#              /**
-#                *      * You will need it if you want your custom credit card form, Step 4 is about it
-#                *          */
-#              public function payment_fields() {
-#
-#                    ...
-#                               
-#                          }
-#
-#              /*
-#                *      * Custom CSS and JS, in most cases required only when you decided to go with a custom credit card form
-#                *          */
-              public function payment_scripts() {
-                // empty payment_scripts method
-              }
-#
 #              /*
 #                *      * Fields validation, more in Step 5
 #                *          */
@@ -149,8 +176,47 @@ function comgate_init_gateway_class() {
 #                *      * We're processing the payments here, everything about it is in Step 5
 #                *          */
               public function create_comgate_payment( $order ) {
-               $transaction_id = base64_encode(random_bytes(10)) ;
-               $order->set_transaction_id($transaction_id) ;
+							require_once dirname(__FILE__).'/lib/ComgatePaymentsSimpleProtocol.php';
+							// initialize payments protocol object
+							$paymentsProtocol = new ComgatePaymentsSimpleProtocol(
+							    $this->paymentsUrl,
+							    $this->merchant,
+							    $this->testmode,
+							    $this->private_key
+							);
+									try {
+									
+									    // create new payment transaction
+									    $paymentsProtocol->createTransaction(
+									        country: 'CZ',               // country
+									        price: $order->get_subtotal(),   // price
+									        currency: $order->get_currency(),   // currency
+									        label: 'Payment test',     // label
+									        refId: $order->get_id(),         // refId aka order_id
+													email: $order->get_billing_email(),				// Customer Email
+									        payerId: NULL,               // payerId
+									        preauth: false  // preauth
+									    );
+									    $transId = $paymentsProtocol->getTransactionId();
+									    // redirect to comgate payments system
+									    $RedirectUrl = $paymentsProtocol->getRedirectUrl();
+									
+									}
+									catch (Exception $e) {
+									    header('Content-Type: text/plain; charset=UTF-8');
+									    echo "ERROR\n\n";
+									    echo $e->getMessage();
+									}
+               		$order->set_transaction_id($transId) ;
+               		$order->save();
+              return $RedirectUrl;
+              }
+
+              public function comgate_complete() {
+	              //$order = wc_get_order( $_GET['id'] );
+	              //$order->payment_complete();
+	              //$order->reduce_order_stock();
+	              update_option('webhook_debug', $_GET);
               }
 
               public function process_payment( $order_id ) {
@@ -160,82 +226,27 @@ function comgate_init_gateway_class() {
 								// we need it to get any order detailes
 								$order = wc_get_order($order_id );
 
-//               wc_add_notice(gettype($order), "error");
-//               wc_add_notice(print_r($order), "error");
                $transaction_id = $order->get_transaction_id();
                if ( strlen($transaction_id) > 0 ) {
                  $trans_status = "order exists" ;
+                 $transaction_id = $order->get_transaction_id();
+                 $comgate_url= add_query_arg('id',$transaction_id, "https://payments.comgate.cz/client/instructions/index") ;
+                 $order->update_status('on-hold', __( 'Awaiting cheque payment', 'woocommerce' ));
                }
                else
                {
-                 $this->create_comgate_payment($order);
+                 $trans_status = "creating order" ;
+                 $comgate_url=$this->create_comgate_payment($order);
                  $transaction_id = $order->get_transaction_id();
                  $trans_status = "creating order" ;
+                 $comgate_url= add_query_arg('id',$transaction_id, "https://payments.comgate.cz/client/instructions/index") ;
+                 $order->update_status('on-hold', __( 'Awaiting cheque payment', 'woocommerce' ));
                }
-               wc_add_notice($order->status, "error");
-               wc_add_notice("transaction_id: $transaction_id", "error");
-               wc_add_notice("transacttion status: $trans_status", "error");
-//               wc_add_notice(get_object_vars($order), "error");
-//               wc_add_notice('test notice', "error");
-//   							wc_add_notice('TESTING Please try again.', 'error' );
-                return;
-							 
-							 
-								/*
-							 	 * Array with parameters for API interaction
-								 */
-								$args = array(
-								);
-							 
-								/*
-								 * Your API interaction could be built with wp_remote_post()
-							 	 */
-								 $response = wp_remote_post( '{payment processor endpoint}', $args );
-							 
-							 
-								 if( !is_wp_error( $response ) ) {
-							 
-									 $body = json_decode( $response['body'], true );
-							 
-									 // it could be different depending on your payment processor
-									 if ( $body['response']['responseCode'] == 'APPROVED' ) {
-							 
-										// we received the payment
-										$order->payment_complete();
-										$order->reduce_order_stock();
-							 
-										// some notes to customer (replace true with false to make it private)
-										$order->add_order_note( 'Hey, your order is paid! Thank you!', true );
-							 
-										// Empty cart
-										$woocommerce->cart->empty_cart();
-							 
-										// Redirect to the thank you page
-										return array(
-											'result' => 'success',
-											'redirect' => $this->get_return_url( $order )
-										);
-							 
-									 } else {
-										wc_add_notice(  'Please try again.', 'error' );
-										return;
-									}
-							 
-								} else {
-									wc_add_notice(  'Connection error.', 'error' );
-									return;
-								}
-    }
-#                          }
-#
-#              /*
-#                *      * In case you need a webhook, like PayPal IPN etc
-#                *          */
-#              public function webhook() {
-#
-#                    ...
-#                                
-#                          }
-          #
-  } #konec class
+               return array(
+                   'result' => 'success',
+//                   'redirect' => $this->get_return_url( $order )
+                   'redirect' => $comgate_url
+               );
+  } 
+}
 }
