@@ -27,8 +27,6 @@ function comgate_init_gateway_class() {
 
     class Comgate_Gateway extends WC_Payment_Gateway {
 
-          /**
-           *      * Class constructor, more about it in Step 3
            *           */
           public function __construct() {
 						$this->id = 'comgate'; // payment gateway plugin ID
@@ -37,8 +35,7 @@ function comgate_init_gateway_class() {
 						$this->method_title = 'Comgate Pay';
 						$this->method_description = 'Comgate Payment Plugin'; // will be displayed on the options page
 					
-						// gateways can support subscriptions, refunds, saved payment methods,
-						// but in this tutorial we begin with simple payments
+						// gateways can support subscriptions, refunds, saved payment methods. Initially simple payments
 						$this->supports = array(
 							'products'
 						);
@@ -56,8 +53,7 @@ function comgate_init_gateway_class() {
             $this->paymentsUrl = $this->testmode ? $this->get_option( 'test_paymentsUrl' ) : $this->get_option( 'paymentsUrl' );
 					
 					
-						// Register Comgate Complete
-//						add_action( 'woocommerce_api_' . $this->id , array( $this, 'comgate_callback' ) );
+       			add_action( 'woocommerce_update_options_payment_gateways_' . $this->id, array( $this, 'process_admin_options' ) );
             add_action( 'woocommerce_api_comgate_callback', array( $this, 'comgate_callback' ) );
           }
 
@@ -114,7 +110,7 @@ function comgate_init_gateway_class() {
 								'title'       => 'Title',
 								'type'        => 'text',
 								'description' => 'This controls the title which the user sees during checkout.',
-								'default'     => 'Credit Card',
+								'default'     => 'Comgate Payment',
 								'desc_tip'    => true,
 							),
 							'description' => array(
@@ -160,21 +156,9 @@ function comgate_init_gateway_class() {
 						);
 					}
 
-#              /*
-#                *      * Fields validation, more in Step 5
-#                *          */
               public function validate_fields() {
-                #if( empty( $_POST[ 'billing_first_name' ]) ) {
-                #    wc_add_notice(  'First name is required!', 'error' );
-                #      return false;
-                #    }
-                #return true; 
-
               }
-#
-#              /*
-#                *      * We're processing the payments here, everything about it is in Step 5
-#                *          */
+
               public function create_comgate_payment( $order ) {
 							require_once dirname(__FILE__).'/lib/ComgatePaymentsSimpleProtocol.php';
 							// initialize payments protocol object
