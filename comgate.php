@@ -26,8 +26,6 @@ add_action( 'plugins_loaded', 'comgate_init_gateway_class' );
 function comgate_init_gateway_class() {
 
     class Comgate_Gateway extends WC_Payment_Gateway {
-
-           *           */
           public function __construct() {
 						$this->id = 'comgate'; // payment gateway plugin ID
 						$this->icon = ''; // URL of the icon that will be displayed on checkout page near your gateway name
