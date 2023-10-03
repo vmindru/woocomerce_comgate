@@ -171,7 +171,7 @@ function comgate_init_gateway_class() {
 									    // create new payment transaction
 									    $paymentsProtocol->createTransaction(
 									        country: 'CZ',               // country
-									        price: $order->get_subtotal(),   // price
+									        price: $order->get_total(),   // price
 									        currency: $order->get_currency(),   // currency
 									        label: 'Payment test',     // label
 									        refId: $order->get_id(),         // refId aka order_id
